@@ -40,15 +40,15 @@ Jarvis, her mum için 0-150 arasında bir puan üretir. Sinyal oluşması için 
 
 ### 1. "Fisherman" Dashboard
 > *Sağ alttaki panelde Binance, OKX ve Bybit borsalarının fonlama oranlarını ve Open Interest (OI) değişimini anlık izleyen veri merkezi.*
-`![Fisherman Dashboard](buraya_dashboard_resmi.png)`
+`!https://github.com/Lomion9/Jarvis-Decision-Support-System/blob/main/Dashboard.png?raw=true`
 
 ### 2. Sniper Giriş ve R:R Hesabı
 > *Jarvis'in "Strong Buy" sinyali ürettiği an. Otomatik hesaplanan Risk:Reward oranı ve likidite havuzlarına (Liquidity Pools) konulan hedefler.*
-`![Jarvis Signal](buraya_sinyal_resmi.png)`
+`!https://github.com/Lomion9/Jarvis-Decision-Support-System/blob/main/Long-Signal.png?raw=true`
 
 ### 3. Tuzağı Tespit Etme (Trap Detection)
 > *Fiyat yükselirken Funding Rate'in aşırı ısınması sonucu Jarvis'in alım yapmayıp (veya satış verip) düşüşten koruduğu bir örnek.*
-`![Trap Detection](buraya_tuzak_resmi.png)`
+`!https://github.com/Lomion9/Jarvis-Decision-Support-System/blob/main/Dashboard.png?raw=true`
 
 ---
 
