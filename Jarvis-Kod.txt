@@ -1,0 +1,1834 @@
+//@version=5
+indicator("Jarvis v1.1 - Fisherman", overlay=true, max_boxes_count=500, max_labels_count=500, max_lines_count=500)
+
+// ==========================================
+// 1. AYARLAR (INPUTS)
+// ==========================================
+jarvisGroup = "Jarvis Ayarlari"
+macdSource = input.source(close, "MACD Kaynagi", group=jarvisGroup)
+macdFast = input.int(12, "Hizli EMA", group=jarvisGroup)
+macdSlow = input.int(26, "Yavas EMA", group=jarvisGroup)
+macdSignal = input.int(9, "Sinyal EMA", group=jarvisGroup)
+
+// --- FISHERMAN (BALİNA) AYARLARI ---
+fishGroup = "Fisherman (Balina) Ayarları"
+useFisherman = input.bool(true, "Fisherman Puanlaması Aktif", group=fishGroup)
+funding_trend_limit = input.float(0.0003, "Normal Funding Limiti (%0.03)", step=0.0001, group=fishGroup)
+
+leftBars = input.int(2, "Fractal Left", group=jarvisGroup)
+rightBars = input.int(2, "Fractal Right", group=jarvisGroup)
+maxAgeBars = input.int(1500, "Max Age (bars)", group=jarvisGroup)
+minRR = input.float(0.0, "Minimum R:R Orani", group=jarvisGroup, step=0.1) 
+atrSLMultiplier = input.float(2.5, "ATR Stop Loss Multiplier", group=jarvisGroup, step=0.1)
+
+showEMA = input.bool(false, "EMAlari Goster", group=jarvisGroup)
+showSRBands = input.bool(true, "Destek/Direnc Goster", group=jarvisGroup)
+showBollinger = input.bool(false, "Bollinger Bantlarini Goster", group=jarvisGroup)
+showQQE = input.bool(false, "QQE Modu Goster", group=jarvisGroup)
+showZLT = input.bool(false, "Zero Lag Trendi Goster", group=jarvisGroup)
+showBreakLabels = input.bool(false, "Kirilim 'B' Etiketlerini Goster", group=jarvisGroup)
+showBuySignals = input.bool(true, title="Al Sinyallerini Goster")
+showSellSignals = input.bool(true, title="Sat Sinyallerini Goster")
+
+// DASHBOARD VE FILTRE AYARLARI
+dashGroup = "Dashboard & Filtreler"
+showDashboard = input.bool(true, "Dashboardlari Goster", group=dashGroup) 
+dashboardLive = input.bool(false, "Dashboard Canli Veri Kullansin", group=dashGroup)
+useSmartFilters = input.bool(true, "Akilli Filtreleri Aktif Et", group=dashGroup)
+showExitSignals = input.bool(true, "Exit (Cikis) Sinyallerini Goster", group=dashGroup)
+
+// QQE MOD AYARLARI
+qqeGroup = "QQE Mod Settings"
+qqeRsiLength = input.int(6, title="QQE RSI Length", group=qqeGroup)
+qqeRsiSmoothing = input.int(5, title="QQE RSI Smoothing", group=qqeGroup)
+qqeFactor = input.float(3.0, title="QQE Factor", group=qqeGroup)
+qqeSource = input.source(close, title="QQE RSI Source", group=qqeGroup)
+
+// ZERO LAG TREND AYARLARI
+zltGroup = "Zero Lag Trend Settings"
+zltLength = input.int(70, "ZLT Length", group = zltGroup)
+zltMult = input.float(1.2, "ZLT Band Multiplier", group = zltGroup)
+
+// VOLUMATIC VIDYA AYARLARI
+vidyaGroup = "Volumatic VIDYA Settings"
+showVolumaticVidya = input.bool(false, "Volumatic VIDYAYi Goster", group = vidyaGroup)
+vidya_length = input.int(10, 'VIDYA Length', group = vidyaGroup)
+vidya_momentum = input.int(20, 'VIDYA Momentum', group = vidyaGroup)
+band_distance = input.float(2, 'Distance factor', step = 0.1, group = vidyaGroup)
+vidya_up_trend_color = input.color(color.green, "VIDYA Up Color", group = vidyaGroup)
+vidya_down_trend_color = input.color(color.red, "VIDYA Down Color", group = vidyaGroup)
+
+// SMC AYARLARI
+smcGroup = "SMC Ayarlari"
+INTERNAL_GROUP = smcGroup + ' - Internal Structure'
+SWING_GROUP = smcGroup + ' - Swing Structure'
+BLOCKS_GROUP = smcGroup + ' - Order Blocks'
+EQUAL_GROUP = smcGroup + ' - EQH/EQL'
+GAPS_GROUP = smcGroup + ' - Fair Value Gaps'
+
+// CONSTANTS
+BULLISH_LEG = 1
+BEARISH_LEG = 0
+BULLISH = +1
+BEARISH = -1
+GREEN = #089981
+RED = #F23645
+ALL = 'All'
+BOS = 'BOS'
+CHOCH = 'CHoCH'
+ATR = 'Atr'
+RANGE = 'Cumulative Mean Range'
+CLOSE = 'Close'
+HIGHLOW = 'High/Low'
+TINY = size.tiny
+SMALL = size.small
+SOLID = 'SOLID'
+DASHED = 'DASHED'
+DOTTED = 'DOTTED'
+
+showInternalsInput = input(true, 'Show Internal Structure', group=INTERNAL_GROUP)
+showInternalBullInput = input.string(ALL, 'Bullish Structure', group=INTERNAL_GROUP, inline='ibull', options=[ALL, BOS, CHOCH])
+internalBullColorInput = input.color(GREEN, '', group=INTERNAL_GROUP, inline='ibull')
+showInternalBearInput = input.string(ALL, 'Bearish Structure', group=INTERNAL_GROUP, inline='ibear', options=[ALL, BOS, CHOCH])
+internalBearColorInput = input.color(RED, '', group=INTERNAL_GROUP, inline='ibear')
+internalFilterConfluenceInput = input(false, 'Confluence Filter', group=INTERNAL_GROUP)
+
+showStructureInput = input(true, 'Show Swing Structure', group=SWING_GROUP)
+showSwingBullInput = input.string(ALL, 'Bullish Structure', group=SWING_GROUP, inline='bull', options=[ALL, BOS, CHOCH])
+swingBullColorInput = input.color(GREEN, '', group=SWING_GROUP, inline='bull')
+showSwingBearInput = input.string(ALL, 'Bearish Structure', group=SWING_GROUP, inline='bear', options=[ALL, BOS, CHOCH])
+swingBearColorInput = input.color(RED, '', group=SWING_GROUP, inline='bear')
+showSwingsInput = input(true, 'Show Swings Points', group=SWING_GROUP, inline='swings')
+swingsLengthInput = input.int(50, '', group=SWING_GROUP, minval=10, inline='swings')
+showHighLowSwingsInput = input(true, 'Show Strong/Weak High/Low', group=SWING_GROUP)
+
+showInternalOrderBlocksInput = input(true, 'Internal Order Blocks', group=BLOCKS_GROUP, inline='iob')
+internalOrderBlocksSizeInput = input.int(5, '', group=BLOCKS_GROUP, minval=1, maxval=20, inline='iob')
+showSwingOrderBlocksInput = input(true, 'Swing Order Blocks', group=BLOCKS_GROUP, inline='ob')
+swingOrderBlocksSizeInput = input.int(5, '', group=BLOCKS_GROUP, minval=1, maxval=20, inline='ob')
+orderBlockFilterInput = input.string(ATR, 'Order Block Filter', group=BLOCKS_GROUP, options=[ATR, RANGE])
+orderBlockMitigationInput = input.string(HIGHLOW, 'Order Block Mitigation', group=BLOCKS_GROUP, options=[CLOSE, HIGHLOW])
+
+showEqualHighsLowsInput = input(true, 'Equal High/Low', group=EQUAL_GROUP)
+equalHighsLowsLengthInput = input.int(3, 'Bars Confirmation', group=EQUAL_GROUP, minval=1)
+equalHighsLowsThresholdInput = input.float(0.1, 'Threshold', group=EQUAL_GROUP, minval=0, maxval=0.5, step=0.1)
+
+showFairValueGapsInput = input(true, 'Fair Value Gaps', group=GAPS_GROUP)
+fairValueGapsThresholdInput = input.bool(true, 'Auto Threshold', group=GAPS_GROUP)
+fairValueGapsTimeframeInput = input.timeframe('', 'Timeframe', group=GAPS_GROUP)
+fairValueGapsExtendInput = input.int(1, 'Extend FVG', group=GAPS_GROUP, minval=0)
+
+// ==========================================
+// 2. VERI YAPILARI
+// ==========================================
+type alerts
+    bool internalBullishBOS = false
+    bool internalBearishBOS = false
+    bool internalBullishCHoCH = false
+    bool internalBearishCHoCH = false
+    bool swingBullishBOS = false
+    bool swingBearishBOS = false
+    bool swingBullishCHoCH = false
+    bool swingBearishCHoCH = false
+    bool internalBullishOrderBlock = false
+    bool internalBearishOrderBlock = false
+    bool swingBullishOrderBlock = false
+    bool swingBearishOrderBlock = false
+    bool equalHighs = false
+    bool equalLows = false
+    bool bullishFairValueGap = false
+    bool bearishFairValueGap = false
+
+type trailingExtremes
+    float top
+    float bottom
+    int barTime
+    int barIndex
+    int lastTopTime
+    int lastBottomTime
+
+type fairValueGap
+    float top
+    float bottom
+    int bias
+    box topBox
+    box bottomBox
+
+type trend
+    int bias
+
+type equalDisplay
+    line l_ine = na
+    label l_abel = na
+
+type pivot
+    float currentLevel
+    float lastLevel
+    bool crossed
+    int barTime = time
+    int barIndex = bar_index
+
+type orderBlock
+    float barHigh
+    float barLow
+    int barTime
+    int bias
+
+var pivot swingHigh = pivot.new(na, na, false)
+var pivot swingLow = pivot.new(na, na, false)
+var pivot internalHigh = pivot.new(na, na, false)
+var pivot internalLow = pivot.new(na, na, false)
+var pivot equalHigh = pivot.new(na, na, false)
+var pivot equalLow = pivot.new(na, na, false)
+var trend swingTrend = trend.new(0)
+var trend internalTrend = trend.new(0)
+var equalDisplay equalHighDisplay = equalDisplay.new()
+var equalDisplay equalLowDisplay = equalDisplay.new()
+var array<fairValueGap> fairValueGaps = array.new<fairValueGap>()
+var array<float> parsedHighs = array.new<float>()
+var array<float> parsedLows = array.new<float>()
+var array<float> highs = array.new<float>()
+var array<float> lows = array.new<float>()
+var array<int> times = array.new<int>()
+var trailingExtremes trailing = trailingExtremes.new()
+var array<orderBlock> swingOrderBlocks = array.new<orderBlock>()
+var array<orderBlock> internalOrderBlocks = array.new<orderBlock>()
+var array<box> swingOrderBlocksBoxes = array.new<box>()
+var array<box> internalOrderBlocksBoxes = array.new<box>()
+var swingBullishColor = GREEN
+var swingBearishColor = RED
+var fairValueGapBullishColor = color.new(#00ff68, 70)
+var fairValueGapBearishColor = color.new(#ff0008, 70)
+varip int currentBarIndex = bar_index
+varip int lastBarIndex = bar_index
+alerts currentAlerts = alerts.new()
+
+// --- DYNAMIC TIMEFRAME MAPPING ---
+var string tf_ltf = "60" 
+var string tf_htf = "D" 
+var string tf_filter = "240" 
+var bool is_tf_supported = false
+
+if timeframe.isminutes
+    if timeframe.multiplier == 60
+        tf_ltf := "15"
+        tf_htf := "240"
+        tf_filter := "60"
+        is_tf_supported := true
+    else if timeframe.multiplier == 120
+        tf_ltf := "30"
+        tf_htf := "240"
+        tf_filter := "120"
+        is_tf_supported := true
+    else if timeframe.multiplier == 180
+        tf_ltf := "45"
+        tf_htf := "D"
+        tf_filter := "180"
+        is_tf_supported := true
+    else if timeframe.multiplier == 240
+        tf_ltf := "60"
+        tf_htf := "D"
+        tf_filter := "240"
+        is_tf_supported := true
+else if timeframe.isdaily
+    tf_ltf := "240"
+    tf_htf := "W"
+    tf_filter := "D"
+    is_tf_supported := true
+else if timeframe.isweekly
+    tf_ltf := "D"
+    tf_htf := "M"
+    tf_filter := "W"
+    is_tf_supported := true
+
+safe_ltf = is_tf_supported ? tf_ltf : timeframe.period
+safe_htf = is_tf_supported ? tf_htf : timeframe.period
+safe_filter = is_tf_supported ? tf_filter : timeframe.period
+
+// --- MARKET CONTEXT & MACD ---
+isBTC = syminfo.tickerid == "BINANCE:BTCUSDT" or syminfo.tickerid == "BITSTAMP:BTCUSD"
+isUSDT_D = syminfo.tickerid == "CRYPTOCAP:USDT.D"
+isTOTAL = syminfo.tickerid == "CRYPTOCAP:TOTAL"
+isTOTAL3 = syminfo.tickerid == "CRYPTOCAP:TOTAL3"
+isAltcoin = not isBTC and not isUSDT_D and not isTOTAL and not isTOTAL3
+
+[macdLine, signalLine, histLine] = ta.macd(macdSource, macdFast, macdSlow, macdSignal)
+isBull = histLine >= 0
+
+[_, _, histLineLTF] = request.security(syminfo.tickerid, safe_ltf, ta.macd(macdSource, macdFast, macdSlow, macdSignal))
+isBull1H = histLineLTF >= 0 
+
+[_, _, histLineHTF] = request.security(syminfo.tickerid, safe_htf, ta.macd(macdSource, macdFast, macdSlow, macdSignal), lookahead=barmerge.lookahead_on)
+isDailyBull_raw = histLineHTF >= 0
+
+// ==========================================
+// FISHERMAN MOTORU (HYBRID CALCULATION)
+// ==========================================
+// Grafik zaman dilimi neyse onu kullaniyoruz
+string tf_chart = timeframe.period 
+float fisherman_interest_rate = 0.0001
+float fisherman_clamp_limit = 0.0005
+
+// Fonksiyonlar
+f_calc_prem_man(float _perp, float _index) =>
+    float _res = 0.0
+    if not na(_perp) and not na(_index) and _index > 0
+        _res := (_perp - _index) / _index
+    _res
+
+f_clamp(float _prem) =>
+    float _clamped = math.max(math.min(fisherman_interest_rate - _prem, fisherman_clamp_limit), -fisherman_clamp_limit)
+    _prem + _clamped
+
+// --- BINANCE (Resmi Premium + Manuel CoinM) ---
+bin_prem_usdt = request.security("BINANCE:BTCUSDT_PREMIUM", tf_chart, close[1])
+bin_fund_usdt = f_clamp(bin_prem_usdt)
+[bo_u_c] = request.security("BINANCE:BTCUSDT.P_OI", tf_chart, [close[1]])
+
+bin_perp_usd = request.security("BINANCE:BTCUSD.P", tf_chart, close[1])
+bin_idx_usd  = request.security("BINANCE:BTCUSD", tf_chart, close[1]) 
+bin_fund_usd = f_clamp(f_calc_prem_man(bin_perp_usd, bin_idx_usd))
+[bo_c_c] = request.security("BINANCE:BTCUSD.P_OI", tf_chart, [close[1]])
+
+bin_avg_fund = (bin_fund_usdt + bin_fund_usd) / 2
+bin_tot_oi = nz(bo_u_c) + nz(bo_c_c)
+
+// --- OKX (Manuel) ---
+okx_perp_u = request.security("OKX:BTCUSDT.P", tf_chart, close[1])
+okx_idx_u  = request.security("OKX:BTCUSDT", tf_chart, close[1])
+okx_fund_u = f_clamp(f_calc_prem_man(okx_perp_u, okx_idx_u))
+[oo_u_c] = request.security("OKX:BTCUSDT.P_OI", tf_chart, [close[1]])
+
+okx_perp_c = request.security("OKX:BTCUSD.P", tf_chart, close[1])
+okx_idx_c  = request.security("OKX:BTCUSD", tf_chart, close[1])
+okx_fund_c = f_clamp(f_calc_prem_man(okx_perp_c, okx_idx_c))
+[oo_c_c] = request.security("OKX:BTCUSD.P_OI", tf_chart, [close[1]])
+
+okx_avg_fund = (okx_fund_u + okx_fund_c) / 2
+okx_tot_oi = nz(oo_u_c) + nz(oo_c_c)
+
+// --- BYBIT (Sadece USDT Funding, USD OI) ---
+byb_perp_u = request.security("BYBIT:BTCUSDT.P", tf_chart, close[1])
+byb_idx_u  = request.security("BYBIT:BTCUSDT", tf_chart, close[1])
+byb_fund_u = f_clamp(f_calc_prem_man(byb_perp_u, byb_idx_u))
+[by_u_c] = request.security("BYBIT:BTCUSDT.P_OI", tf_chart, [close[1]])
+[by_c_c] = request.security("BYBIT:BTCUSD.P_OI", tf_chart, [close[1]])
+
+byb_avg_fund = byb_fund_u
+byb_tot_oi = nz(by_u_c) + nz(by_c_c)
+
+// --- AGGREGATION & WEIGHTING (YENI MANTIK) ---
+grand_total_oi = bin_tot_oi + okx_tot_oi + byb_tot_oi
+safe_total = grand_total_oi > 0 ? grand_total_oi : 1
+
+w_bin = bin_tot_oi / safe_total
+w_okx = okx_tot_oi / safe_total
+w_byb = byb_tot_oi / safe_total
+
+// 1. Önce Anlık Ağırlıklı Ortalamayı Bul (Ham Veri)
+raw_weighted_funding = (bin_avg_fund * w_bin) + (okx_avg_fund * w_okx) + (byb_avg_fund * w_byb)
+
+// 2. Sonra Buna TWAP Uygula (Sinyal ve Puanlama İçin)
+int dynamic_twap = timeframe.isintraday and timeframe.multiplier < 60 ? 12 : 1
+w_funding = ta.sma(raw_weighted_funding, dynamic_twap)
+
+// 3. Tabloda Göstermek İçin Bireysel TWAP (Sinyali Etkilemez, Sadece Görsel)
+bin_display = ta.sma(bin_avg_fund, dynamic_twap)
+okx_display = ta.sma(okx_avg_fund, dynamic_twap)
+byb_display = ta.sma(byb_avg_fund, dynamic_twap)
+
+// 2. OI Trendi (Previous vs Current)
+grand_total_oi_prev = request.security("BINANCE:BTCUSDT.P_OI", tf_chart, close[2]) + request.security("BINANCE:BTCUSD.P_OI", tf_chart, close[2]) + request.security("OKX:BTCUSDT.P_OI", tf_chart, close[2]) + request.security("OKX:BTCUSD.P_OI", tf_chart, close[2]) + request.security("BYBIT:BTCUSDT.P_OI", tf_chart, close[2]) + request.security("BYBIT:BTCUSD.P_OI", tf_chart, close[2])
+
+bool is_OI_Rising = grand_total_oi > grand_total_oi_prev
+
+// ==========================================
+// QQE TREND CALCULATION
+// ==========================================
+f_getQQEDirection(_len, _smooth, _factor) =>
+    _rsi = ta.rsi(close, _len) 
+    _smoothedRsi = ta.ema(_rsi, _smooth)
+    _atrRsi = math.abs(nz(_smoothedRsi[1], _smoothedRsi) - _smoothedRsi)
+    _wilders = _len * 2 - 1
+    _smoothedAtrRsi = ta.ema(_atrRsi, _wilders)
+    _dynamicAtrRsi = _smoothedAtrRsi * _factor
+    _trend = (_smoothedRsi - 50) > 0 ? 1 : -1
+    _trend
+
+trend_BTC_D = request.security("CRYPTOCAP:BTC.D", safe_filter, f_getQQEDirection(qqeRsiLength, qqeRsiSmoothing, qqeFactor))
+trend_USDT_D = request.security("CRYPTOCAP:USDT.D", safe_filter, f_getQQEDirection(qqeRsiLength, qqeRsiSmoothing, qqeFactor))
+trend_DXY = request.security("TVC:DXY", safe_filter, f_getQQEDirection(qqeRsiLength, qqeRsiSmoothing, qqeFactor))
+trend_TOTAL = request.security("CRYPTOCAP:TOTAL", safe_filter, f_getQQEDirection(qqeRsiLength, qqeRsiSmoothing, qqeFactor))
+trend_TOTAL3 = request.security("CRYPTOCAP:TOTAL3", safe_filter, f_getQQEDirection(qqeRsiLength, qqeRsiSmoothing, qqeFactor))
+trend_BTC_Price = request.security("BINANCE:BTCUSDT", safe_filter, f_getQQEDirection(qqeRsiLength, qqeRsiSmoothing, qqeFactor))
+
+var bool d_isBTC_D_Bull = false
+var bool d_isUSDT_D_Bull = false
+var bool d_isDXY_Bull = false
+var bool d_isTOTAL_Bull = false
+var bool d_isTOTAL3_Bull = false
+
+bool updateCondition = dashboardLive ? true : barstate.isconfirmed
+
+if updateCondition
+    d_isBTC_D_Bull := (trend_BTC_D == 1)
+    d_isUSDT_D_Bull := (trend_USDT_D == 1)
+    d_isDXY_Bull := (trend_DXY == 1)
+    d_isTOTAL_Bull := (trend_TOTAL == 1)
+    d_isTOTAL3_Bull := (trend_TOTAL3 == 1)
+
+vixClose = request.security("TVC:VIX", safe_filter, close)
+isVixRising = vixClose > vixClose[1]
+isVixFalling = vixClose < vixClose[1]
+imf = ta.mfi(close, 14)
+isImfRising = imf > imf[1]
+isImfFalling = imf < imf[1]
+
+bbLength = input.int(20, "BB Periyot", group=jarvisGroup)
+bbMult = input.float(2.0, "BB Std Sapma", group=jarvisGroup)
+basis = ta.sma(close, bbLength)
+dev = bbMult * ta.stdev(close, bbLength)
+upper = basis + dev
+lower = basis - dev
+bbWidth = (upper - lower) / basis
+isHighVolatility = bbWidth > ta.sma(bbWidth, 20)
+
+stochRsiFunc() =>
+    rsi = ta.rsi(close, 14)
+    stochRsi = ta.stoch(rsi, rsi, rsi, 14)
+    stochRsiD = ta.sma(stochRsi, 3)
+    [stochRsi, stochRsiD]
+[stochRsi, stochRsiD] = stochRsiFunc()
+isStochBuyCross = ta.crossover(stochRsi, 20)
+isStochSellCross = ta.crossunder(stochRsi, 80)
+ema8 = ta.ema(close, 8)
+ema200 = ta.ema(close, 200)
+
+var isBullishBreak = false
+var isBearishBreak = false
+isBullishBreak := false
+isBearishBreak := false
+
+if barstate.isfirst
+    if showSwingOrderBlocksInput
+        for index = 1 to swingOrderBlocksSizeInput
+            swingOrderBlocksBoxes.push(box.new(na, na, na, na, xloc=xloc.bar_time, extend=extend.right))
+    if showInternalOrderBlocksInput
+        for index = 1 to internalOrderBlocksSizeInput
+            internalOrderBlocksBoxes.push(box.new(na, na, na, na, xloc=xloc.bar_time, extend=extend.right))
+
+bearishOrderBlockMitigationSource = orderBlockMitigationInput == CLOSE ? close : high
+bullishOrderBlockMitigationSource = orderBlockMitigationInput == CLOSE ? close : low
+atrMeasure = ta.atr(200)
+volatilityMeasure = orderBlockFilterInput == ATR ? atrMeasure : ta.cum(ta.tr) / bar_index
+highVolatilityBar = (high - low) >= (2 * volatilityMeasure)
+parsedHigh = highVolatilityBar ? low : high
+parsedLow = highVolatilityBar ? high : low
+parsedHighs.push(parsedHigh)
+parsedLows.push(parsedLow)
+highs.push(high)
+lows.push(low)
+times.push(time)
+
+// 3. YARDIMCI FONKSIYONLAR (SMC & DRAWING)
+leg(int size) =>
+    var leg = 0
+    newLegHigh = high[size] > ta.highest(size)
+    newLegLow = low[size] < ta.lowest(size)
+    if newLegHigh
+        leg := BEARISH_LEG
+    else if newLegLow
+        leg := BULLISH_LEG
+    leg
+
+startOfNewLeg(int leg) => ta.change(leg) != 0
+startOfBearishLeg(int leg) => ta.change(leg) == -1
+startOfBullishLeg(int leg) => ta.change(leg) == +1
+
+getStyle(string style) =>
+    switch style
+        SOLID => line.style_solid
+        DASHED => line.style_dashed
+        DOTTED => line.style_dotted
+
+drawLabel(int labelTime, float labelPrice, string tag, color labelColor, string labelStyle) =>
+    var label l_abel = na
+    l_abel.delete()
+    l_abel := label.new(chart.point.new(labelTime, na, labelPrice), tag, xloc.bar_time, color=color(na), textcolor=labelColor, style=labelStyle, size=size.small)
+
+drawEqualHighLow(pivot p_ivot, float level, int size, bool equalHigh) =>
+    equalDisplay e_qualDisplay = equalHigh ? equalHighDisplay : equalLowDisplay
+    string tag = 'EQL'
+    color equalColor = swingBullishColor
+    string labelStyle = label.style_label_up
+    if equalHigh
+        tag := 'EQH'
+        equalColor := swingBearishColor
+        labelStyle := label.style_label_down
+    line.delete(e_qualDisplay.l_ine)
+    label.delete(e_qualDisplay.l_abel)
+    e_qualDisplay.l_ine := line.new(chart.point.new(p_ivot.barTime, na, p_ivot.currentLevel), chart.point.new(time[size], na, level), xloc=xloc.bar_time, color=equalColor, style=line.style_dotted)
+    labelPosition = math.round(0.5 * (p_ivot.barIndex + bar_index - size))
+    e_qualDisplay.l_abel := label.new(chart.point.new(na, labelPosition, level), tag, xloc.bar_index, color=color(na), textcolor=equalColor, style=labelStyle, size=TINY)
+
+getCurrentStructure(int size, bool equalHighLow=false, bool internal=false) =>
+    currentLeg = leg(size)
+    newPivot = startOfNewLeg(currentLeg)
+    pivotLow = startOfBullishLeg(currentLeg)
+    pivotHigh = startOfBearishLeg(currentLeg)
+    if newPivot
+        if pivotLow
+            pivot p_ivot = equalHighLow ? equalLow : internal ? internalLow : swingLow
+            if equalHighLow and math.abs(p_ivot.currentLevel - low[size]) < equalHighsLowsThresholdInput * atrMeasure
+                drawEqualHighLow(p_ivot, low[size], size, false)
+            p_ivot.lastLevel := p_ivot.currentLevel
+            p_ivot.currentLevel := low[size]
+            p_ivot.crossed := false
+            p_ivot.barTime := time[size]
+            p_ivot.barIndex := bar_index[size]
+            if not equalHighLow and not internal
+                trailing.bottom := p_ivot.currentLevel
+                trailing.barTime := p_ivot.barTime
+                trailing.barIndex := p_ivot.barIndex
+                trailing.lastBottomTime := p_ivot.barTime
+            if showSwingsInput and not internal and not equalHighLow
+                drawLabel(time[size], p_ivot.currentLevel, p_ivot.currentLevel < p_ivot.lastLevel ? 'LL' : 'HL', swingBullishColor, label.style_label_up)
+        else
+            pivot p_ivot = equalHighLow ? equalHigh : internal ? internalHigh : swingHigh
+            if equalHighLow and math.abs(p_ivot.currentLevel - high[size]) < equalHighsLowsThresholdInput * atrMeasure
+                drawEqualHighLow(p_ivot, high[size], size, true)
+            p_ivot.lastLevel := p_ivot.currentLevel
+            p_ivot.currentLevel := high[size]
+            p_ivot.crossed := false
+            p_ivot.barTime := time[size]
+            p_ivot.barIndex := bar_index[size]
+            if not equalHighLow and not internal
+                trailing.top := p_ivot.currentLevel
+                trailing.barTime := p_ivot.barTime
+                trailing.barIndex := p_ivot.barIndex
+                trailing.lastTopTime := p_ivot.barTime
+            if showSwingsInput and not internal and not equalHighLow
+                drawLabel(time[size], p_ivot.currentLevel, p_ivot.currentLevel > p_ivot.lastLevel ? 'HH' : 'LH', swingBearishColor, label.style_label_down)
+
+drawStructure(pivot p_ivot, string tag, color structureColor, string lineStyleString, string labelStyle, string labelSize) =>
+    var line l_ine = line.new(na, na, na, na, xloc=xloc.bar_time)
+    var label l_abel = label.new(na, na)
+    l_ine.delete()
+    l_abel.delete()
+    l_ine := line.new(chart.point.new(p_ivot.barTime, na, p_ivot.currentLevel), chart.point.new(time, na, p_ivot.currentLevel), xloc = xloc.bar_time, color=structureColor, style=getStyle(lineStyleString))
+    l_abel := label.new(chart.point.new(na, math.round(0.5 * (p_ivot.barIndex + bar_index)), p_ivot.currentLevel), tag, xloc.bar_index, color=color(na), textcolor=structureColor, style=labelStyle, size=labelSize)
+
+deleteOrderBlocks(bool internal=false) =>
+    array<orderBlock> orderBlocks = internal ? internalOrderBlocks : swingOrderBlocks
+    if orderBlocks.size() > 0
+        for i = orderBlocks.size() - 1 to 0
+            eachOrderBlock = orderBlocks.get(i)
+            bool crossedOderBlock = false
+            if bearishOrderBlockMitigationSource > eachOrderBlock.barHigh and eachOrderBlock.bias == BEARISH
+                crossedOderBlock := true
+                if internal
+                    currentAlerts.internalBearishOrderBlock := true
+                else
+                    currentAlerts.swingBearishOrderBlock := true
+            else if bullishOrderBlockMitigationSource < eachOrderBlock.barLow and eachOrderBlock.bias == BULLISH
+                crossedOderBlock := true
+                if internal
+                    currentAlerts.internalBullishOrderBlock := true
+                else
+                    currentAlerts.swingBullishOrderBlock := true
+            if crossedOderBlock
+                orderBlocks.remove(i)
+
+storeOrdeBlock(pivot p_ivot, bool internal=false, int bias) =>
+    if (not internal and showSwingOrderBlocksInput) or (internal and showInternalOrderBlocksInput)
+        array<float> a_rray = na
+        int parsedIndex = na
+        if bias == BEARISH
+            a_rray := parsedHighs.slice(p_ivot.barIndex, bar_index)
+            parsedIndex := p_ivot.barIndex + a_rray.indexof(a_rray.max())
+        else
+            a_rray := parsedLows.slice(p_ivot.barIndex, bar_index)
+            parsedIndex := p_ivot.barIndex + a_rray.indexof(a_rray.min())
+        orderBlock o_rderBlock = orderBlock.new(parsedHighs.get(parsedIndex), parsedLows.get(parsedIndex), times.get(parsedIndex), bias)
+        array<orderBlock> orderBlocks = internal ? internalOrderBlocks : swingOrderBlocks
+        if orderBlocks.size() >= 100
+            orderBlocks.pop()
+        orderBlocks.unshift(o_rderBlock)
+
+drawOrderBlocks(bool internal=false) =>
+    array<orderBlock> orderBlocks = internal ? internalOrderBlocks : swingOrderBlocks
+    orderBlocksSize = orderBlocks.size()
+    if orderBlocksSize > 0
+        maxOrderBlocks = internal ? internalOrderBlocksSizeInput : swingOrderBlocksSizeInput
+        array<orderBlock> parsedOrdeBlocks = orderBlocks.slice(0, math.min(maxOrderBlocks, orderBlocksSize))
+        array<box> b_oxes = internal ? internalOrderBlocksBoxes : swingOrderBlocksBoxes
+        for [index, eachOrderBlock] in parsedOrdeBlocks
+            orderBlockColor = internal ? (eachOrderBlock.bias == BEARISH ? color.new(#f77c80, 80) : color.new(#3179f5, 80)) : (eachOrderBlock.bias == BEARISH ? color.new(#b22833, 80) : color.new(#1848cc, 80))
+            box b_ox = b_oxes.get(index)
+            b_ox.set_top_left_point(chart.point.new(eachOrderBlock.barTime, na, eachOrderBlock.barHigh))
+            b_ox.set_bottom_right_point(chart.point.new(last_bar_time, na, eachOrderBlock.barLow))
+            b_ox.set_border_color(internal ? na : orderBlockColor)
+            b_ox.set_bgcolor(orderBlockColor)
+
+displayStructure(bool internal=false) =>
+    var bullishBar = true
+    var bearishBar = true
+    if internalFilterConfluenceInput
+        bullishBar := high - math.max(close, open) > math.min(close, open - low)
+        bearishBar := high - math.max(close, open) < math.min(close, open - low)
+    pivot p_ivot = internal ? internalHigh : swingHigh
+    trend t_rend = internal ? internalTrend : swingTrend
+    string lineStyle = internal ? DASHED : SOLID
+    string labelSize = internal ? TINY : SMALL
+    bool extraCondition = internal ? internalHigh.currentLevel != swingHigh.currentLevel and bullishBar : true
+    color bullishColor = internal ? internalBullColorInput : swingBullColorInput
+    if ta.crossover(close, p_ivot.currentLevel) and not p_ivot.crossed and extraCondition
+        string tag = t_rend.bias == BEARISH ? CHOCH : BOS
+        if internal
+            currentAlerts.internalBullishCHoCH := tag == CHOCH
+            currentAlerts.internalBullishBOS := tag == BOS
+        else
+            currentAlerts.swingBullishCHoCH := tag == CHOCH
+            currentAlerts.swingBullishBOS := tag == BOS
+        p_ivot.crossed := true
+        t_rend.bias := BULLISH
+        bool displayCondition = internal ? (showInternalsInput and (showInternalBullInput == ALL or (showInternalBullInput == BOS and tag != CHOCH) or (showInternalBullInput == CHOCH and tag == CHOCH))) : (showStructureInput and (showSwingBullInput == ALL or (showSwingBullInput == BOS and tag != CHOCH) or (showSwingBullInput == CHOCH and tag == CHOCH)))
+        if displayCondition
+            drawStructure(p_ivot, tag, bullishColor, lineStyle, label.style_label_down, labelSize)
+        if (internal and showInternalOrderBlocksInput) or (not internal and showSwingOrderBlocksInput)
+            storeOrdeBlock(p_ivot, internal, BULLISH)
+    p_ivot := internal ? internalLow : swingLow
+    extraCondition := internal ? internalLow.currentLevel != swingLow.currentLevel and bearishBar : true
+    bearishColor = internal ? internalBearColorInput : swingBearColorInput
+    if ta.crossunder(close, p_ivot.currentLevel) and not p_ivot.crossed and extraCondition
+        string tag = t_rend.bias == BULLISH ? CHOCH : BOS
+        if internal
+            currentAlerts.internalBearishCHoCH := tag == CHOCH
+            currentAlerts.internalBearishBOS := tag == BOS
+        else
+            currentAlerts.swingBearishCHoCH := tag == CHOCH
+            currentAlerts.swingBearishBOS := tag == BOS
+        p_ivot.crossed := true
+        t_rend.bias := BEARISH
+        displayCondition = internal ? showInternalsInput and (showInternalBearInput == ALL or (showInternalBearInput == BOS and tag != CHOCH) or (showInternalBearInput == CHOCH and tag == CHOCH)) : showStructureInput and (showSwingBearInput == ALL or (showSwingBearInput == BOS and tag != CHOCH) or (showSwingBearInput == CHOCH and tag == CHOCH))
+        if displayCondition
+            drawStructure(p_ivot, tag, bearishColor, lineStyle, label.style_label_up, labelSize)
+        if (internal and showInternalOrderBlocksInput) or (not internal and showSwingOrderBlocksInput)
+            storeOrdeBlock(p_ivot, internal, BEARISH)
+
+fairValueGapBox(leftTime, rightTime, topPrice, bottomPrice, boxColor) => box.new(chart.point.new(leftTime, na, topPrice), chart.point.new(rightTime + fairValueGapsExtendInput * (time - time[1]), na, bottomPrice), xloc=xloc.bar_time, border_color=boxColor, bgcolor=boxColor)
+
+deleteFairValueGaps() =>
+    if fairValueGaps.size() > 0
+        for i = fairValueGaps.size() - 1 to 0
+            eachFairValueGap = fairValueGaps.get(i)
+            if (low < eachFairValueGap.bottom and eachFairValueGap.bias == BULLISH) or (high > eachFairValueGap.top and eachFairValueGap.bias == BEARISH)
+                eachFairValueGap.topBox.delete()
+                eachFairValueGap.bottomBox.delete()
+                fairValueGaps.remove(i)
+
+drawFairValueGaps() =>
+    [lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low] = request.security(syminfo.tickerid, fairValueGapsTimeframeInput, [close[1], open[1], time[1], high[0], low[0], time[0], high[2], low[2]], lookahead=barmerge.lookahead_on)
+    barDeltaPercent = (lastClose - lastOpen) / (lastOpen * 100)
+    newTimeframe = timeframe.change(fairValueGapsTimeframeInput)
+    threshold = fairValueGapsThresholdInput ? ta.cum(math.abs(newTimeframe ? barDeltaPercent : 0)) / bar_index * 2 : 0
+    bullishFairValueGap = currentLow > last2High and lastClose > last2High and barDeltaPercent > threshold and newTimeframe
+    bearishFairValueGap = currentHigh < last2Low and lastClose < last2Low and -barDeltaPercent > threshold and newTimeframe
+    if bullishFairValueGap
+        currentAlerts.bullishFairValueGap := true
+        fairValueGaps.unshift(fairValueGap.new(currentLow, last2High, BULLISH, fairValueGapBox(lastTime, currentTime, currentLow, math.avg(currentLow, last2High), fairValueGapBullishColor), fairValueGapBox(lastTime, currentTime, math.avg(currentLow, last2High), last2High, fairValueGapBullishColor)))
+    if bearishFairValueGap
+        currentAlerts.bearishFairValueGap := true
+        fairValueGaps.unshift(fairValueGap.new(currentHigh, last2Low, BEARISH, fairValueGapBox(lastTime, currentTime, currentHigh, math.avg(currentHigh, last2Low), fairValueGapBearishColor), fairValueGapBox(lastTime, currentTime, math.avg(currentHigh, last2Low), last2Low, fairValueGapBearishColor)))
+
+updateTrailingExtremes() =>
+    trailing.top := math.max(high, trailing.top)
+    trailing.lastTopTime := trailing.top == high ? time : trailing.lastTopTime
+    trailing.bottom := math.min(low, trailing.bottom)
+    trailing.lastBottomTime := trailing.bottom == low ? time : trailing.lastBottomTime
+
+drawHighLowSwings() =>
+    var line topLine = line.new(na, na, na, na, color=swingBearishColor, xloc=xloc.bar_time)
+    var line bottomLine = line.new(na, na, na, na, color=swingBullishColor, xloc=xloc.bar_time)
+    var label topLabel = label.new(na, na, color=color(na), textcolor=swingBearishColor, xloc=xloc.bar_time, style=label.style_label_down, size=size.tiny)
+    var label bottomLabel = label.new(na, na, color=color(na), textcolor=swingBullishColor, xloc=xloc.bar_time, style=label.style_label_up, size=size.tiny)
+    rightTimeBar = last_bar_time + 20 * (time - time[1])
+    topLine.set_first_point(chart.point.new(trailing.lastTopTime, na, trailing.top))
+    topLine.set_second_point(chart.point.new(rightTimeBar, na, trailing.top))
+    topLabel.set_point(chart.point.new(rightTimeBar, na, trailing.top))
+    topLabel.set_text(swingTrend.bias == BEARISH ? 'Strong High' : 'Weak High')
+    bottomLine.set_first_point(chart.point.new(trailing.lastBottomTime, na, trailing.bottom))
+    bottomLine.set_second_point(chart.point.new(rightTimeBar, na, trailing.bottom))
+    bottomLabel.set_point(chart.point.new(rightTimeBar, na, trailing.bottom))
+    bottomLabel.set_text(swingTrend.bias == BULLISH ? 'Strong Low' : 'Weak Low')
+
+isInOrderBlock(int bias) =>
+    var bool inBlock = false
+    array<orderBlock> orderBlocks = swingOrderBlocks
+    if array.size(orderBlocks) > 0
+        int limit = math.min(array.size(orderBlocks), swingOrderBlocksSizeInput)
+        for i = 0 to limit - 1
+            orderBlock ob = array.get(orderBlocks, i)
+            if ob.bias == bias and close >= ob.barLow and close <= ob.barHigh
+                inBlock := true
+                break
+    inBlock
+
+// 4. DIGER INDIKATORLER (ZLT, QQE, VIDYA)
+atr = ta.atr(14)
+scaledAtr = atr 
+
+srBandFactorAuto() =>
+    float f = 0.25
+    if timeframe.isintraday
+        if timeframe.multiplier <= 5
+            f := 0.5
+        else if timeframe.multiplier <= 15
+            f := 0.4
+        else if timeframe.multiplier <= 30
+            f := 0.35
+        else if timeframe.multiplier <= 60
+            f := 0.3
+        else if timeframe.multiplier <= 120
+            f := 0.20
+        else if timeframe.multiplier <= 240
+            f := 0.16
+        else
+            f := 0.13
+    else
+        f := 0.12
+    f
+var float sr_band_factor = srBandFactorAuto()
+
+// ZERO LAG TREND
+zltSrc = close
+zltLag = math.floor((zltLength - 1) / 2)
+zltZlema = ta.ema(zltSrc + (zltSrc - nz(zltSrc[zltLag], zltSrc)), zltLength)
+zltVolatility = ta.highest(ta.atr(zltLength), math.max(1, zltLength * 3)) * zltMult
+var int zltTrend = 0
+if ta.crossover(close, zltZlema + zltVolatility)
+    zltTrend := 1
+if ta.crossunder(close, zltZlema - zltVolatility)
+    zltTrend := -1
+isZltBullish = zltTrend == 1
+isZltBearish = zltTrend == -1
+isZltBullishTrendChange = ta.crossover(zltTrend, 0)
+isZltBearishTrendChange = ta.crossunder(zltTrend, 0)
+
+// QQE MOD (CHART VISUAL)
+calculateQQE(rsiLength, smoothingFactor, qqeFactor, source) =>
+    wildersLength = rsiLength * 2 - 1
+    rsi = ta.rsi(source, rsiLength)
+    smoothedRsi = ta.ema(rsi, smoothingFactor)
+    atrRsi = math.abs(nz(smoothedRsi[1], smoothedRsi) - smoothedRsi)
+    smoothedAtrRsi = ta.ema(atrRsi, wildersLength)
+    dynamicAtrRsi = smoothedAtrRsi * qqeFactor
+    var float longBand = na
+    var float shortBand = na
+    var int trendDirection = 0
+    trendDirection := nz(trendDirection[1], 0)
+    float atrDelta = dynamicAtrRsi
+    float newShortBand = smoothedRsi + atrDelta
+    float newLongBand = smoothedRsi - atrDelta
+    float prevLong = nz(longBand[1], newLongBand)
+    float prevShort = nz(shortBand[1], newShortBand)
+    longBand := (nz(smoothedRsi[1], smoothedRsi) > prevLong and smoothedRsi > prevLong) ? math.max(prevLong, newLongBand) : newLongBand
+    shortBand := (nz(smoothedRsi[1], smoothedRsi) < prevShort and smoothedRsi < prevShort) ? math.min(prevShort, newShortBand) : newShortBand
+    if ta.crossover(smoothedRsi, prevShort)
+        trendDirection := 1
+    else if ta.crossunder(smoothedRsi, prevLong)
+        trendDirection := -1
+    else
+        trendDirection := nz(trendDirection[1], 0)
+    qqeTrendLine = trendDirection == 1 ? longBand : shortBand
+    [qqeTrendLine, smoothedRsi, trendDirection]
+[qqeTrendLine, qqeRsiLine, localQQETrend] = calculateQQE(qqeRsiLength, qqeRsiSmoothing, qqeFactor, qqeSource)
+isQQEBullishCross = ta.crossover(qqeRsiLine - 50, 0)
+isQQEBearishCross = ta.crossunder(qqeRsiLine - 50, 0)
+
+// VOLUMATIC VIDYA
+var float local_vidya_value = na
+vidya_calc(src, vidya_length_, vidya_momentum_) =>
+    float momentum = ta.change(src)
+    float sum_pos_momentum = math.sum(momentum >= 0 ? momentum : 0.0, vidya_momentum_)
+    float sum_neg_momentum = math.sum(momentum >= 0 ? 0.0 : -momentum, vidya_momentum_)
+    float denom = sum_pos_momentum + sum_neg_momentum
+    float abs_cmo = denom != 0 ? math.abs(100 * (sum_pos_momentum - sum_neg_momentum) / denom) : 0.0
+    float alpha = 2 / (vidya_length_ + 1)
+    float k = alpha * abs_cmo / 100
+    var float local_vidya_value = nz(local_vidya_value[1], src)
+    local_vidya_value := k * src + (1 - k) * nz(local_vidya_value[1], src)
+    ta.sma(local_vidya_value, 15)
+var float vidya_value = na
+vidya_value := vidya_calc(close, vidya_length, vidya_momentum)
+vidya_upper_band = vidya_value + scaledAtr * band_distance
+vidya_lower_band = vidya_value - scaledAtr * band_distance
+var bool is_vidya_trend_up = false
+is_vidya_trend_up := nz(is_vidya_trend_up[1], false)
+if ta.crossover(close, vidya_upper_band)
+    is_vidya_trend_up := true
+if ta.crossunder(close, vidya_lower_band)
+    is_vidya_trend_up := false
+isVidyaBullishCross = not nz(is_vidya_trend_up[1], false) and is_vidya_trend_up
+isVidyaBearishCross = nz(is_vidya_trend_up[1], false) and not is_vidya_trend_up
+var float vidya_up_trend_volume = 0.0
+vidya_up_trend_volume := nz(vidya_up_trend_volume[1], 0.0)
+var float vidya_down_trend_volume = 0.0
+vidya_down_trend_volume := nz(vidya_down_trend_volume[1], 0.0)
+if ta.change(is_vidya_trend_up)
+    vidya_up_trend_volume := 0.0
+    vidya_down_trend_volume := 0.0
+else
+    vidya_up_trend_volume := vidya_up_trend_volume + (close > open ? volume : 0)
+    vidya_down_trend_volume := vidya_down_trend_volume + (close < open ? volume : 0)
+avg_volume_delta = (vidya_up_trend_volume + vidya_down_trend_volume) / 2
+vidya_delta_volume_percent = avg_volume_delta != 0 ? math.abs(vidya_up_trend_volume - vidya_down_trend_volume) / avg_volume_delta * 100 : 0
+var bool is_low_delta_period = vidya_delta_volume_percent <= 10
+
+var bool zltBullCredit = false
+var bool zltBearCredit = false
+var bool vidyaBullCredit = false
+var bool vidyaBearCredit = false
+
+if isZltBullishTrendChange
+    zltBullCredit := true
+    zltBearCredit := false
+if isZltBearishTrendChange
+    zltBearCredit := true
+    zltBullCredit := false
+
+if isVidyaBullishCross
+    vidyaBullCredit := true
+    vidyaBearCredit := false
+if isVidyaBearishCross
+    vidyaBearCredit := true
+    vidyaBullCredit := false
+
+var bool smcSwingBullBias = false
+var bool smcSwingBearBias = false
+
+// 5. PUANLAMA SISTEMI (SCORING) + FISHERMAN ENTRY LOGIC
+calculateScore(isBuy) =>
+    float score = 0
+    string details = ""
+    
+    if isBuy
+        if close > nz(ema8, close)
+            score += 5
+            details := details + "Fiyat > EMA8 (+5)\n"
+        if close > nz(ema200, close)
+            score += 5
+            details := details + "Fiyat > EMA200 (+5)\n"
+        
+        if nz(ema8, 0) > nz(ema200, 0)
+            score += 15
+            details := details + "EMA Trendi (GC) (+15)\n"
+
+        if nz(histLine[1], histLine) < 0 and histLine > 0 and histLine > nz(histLine[1], histLine) and histLine > 0.05
+            score += 10
+            details := details + "MACD Al (+10)\n"
+        if nz(close[1], close) < nz(ema8[1], ema8) and close > nz(ema8, close)
+            score += 5
+            details := details + "EMA8 Kirilim (+5)\n"
+        if nz(close[1], close) < nz(ema200[1], ema200) and close > nz(ema200, close)
+            score += 10
+            details := details + "EMA200 Kirilim (+10)\n"
+        
+        if isBull and isBull1H and isDailyBull_raw
+            score += 15
+            details := details + "Full Timeframe Bull (+15)\n"
+        else if isBull and isBull1H
+            score += 10
+            details := details + "LTF+Curr Bull (+10)\n"
+            
+        if zltBullCredit
+            score += 40
+            details := details + "ZLT Trendi (+40)\n"
+
+        if vidyaBullCredit
+            score += 10
+            details := details + "Vidya Trendi (+10)\n"
+
+        if vidya_delta_volume_percent > 30
+            score += 5
+        if vidya_delta_volume_percent > 50
+            score += 10
+        if isHighVolatility
+            score += 5
+        if isImfRising
+            score += 10
+            details := details + "MFI Artiyor (+10)\n"
+        if isQQEBullishCross
+            score += 20
+            details := details + "QQE Cross (+20)\n"
+        if isStochBuyCross
+            score += 10
+            details := details + "Stoch Al (+10)\n"
+        if isBullishBreak
+            score += 5
+            details := details + "Direnc Kirilimi (+5)\n"
+    else
+        if close < nz(ema8, close)
+            score += 5
+            details := details + "Fiyat < EMA8 (+5)\n"
+        if close < nz(ema200, close)
+            score += 5
+            details := details + "Fiyat < EMA200 (+5)\n"
+        
+        if nz(ema8, 0) < nz(ema200, 0)
+            score += 15
+            details := details + "EMA Trendi (DC) (+15)\n"
+
+        if nz(histLine[1], histLine) > 0 and histLine < 0 and histLine < nz(histLine[1], histLine) and histLine < -0.05
+            score += 10
+            details := details + "MACD Sat (+10)\n"
+        if nz(close[1], close) > nz(ema8[1], ema8) and close < nz(ema8, close)
+            score += 5
+            details := details + "EMA8 Asagi Kirilim (+5)\n"
+        if nz(close[1], close) > nz(ema200[1], ema200) and close < nz(ema200, close)
+            score += 10
+            details := details + "EMA200 Asagi Kirilim (+10)\n"
+        
+        if (not isBull) and (not isBull1H) and (not isDailyBull_raw)
+            score += 15
+            details := details + "Full Timeframe Bear (+15)\n"
+        else if (not isBull) and (not isBull1H)
+            score += 10
+            details := details + "LTF+Curr Bear (+10)\n"
+        
+        if zltBearCredit
+            score += 40
+            details := details + "ZLT Trendi (+40)\n"
+
+        if vidyaBearCredit
+            score += 10
+            details := details + "Vidya Trendi (+10)\n"
+
+        if vidya_delta_volume_percent > 30
+            score += 5
+        if vidya_delta_volume_percent > 50
+            score += 10
+        if isHighVolatility
+            score += 5
+        if isImfFalling
+            score += 10
+            details := details + "MFI Dusuyor (+10)\n"
+        if isQQEBearishCross
+            score += 20
+            details := details + "QQE Cross (+20)\n"
+        if isStochSellCross
+            score += 10
+            details := details + "Stoch Sat (+10)\n"
+        if isBearishBreak
+            score += 5
+            details := details + "Destek Kirilimi (+5)\n"
+    
+    if isBuy
+        if smcSwingBullBias
+            score += 20
+            details := details + "Swing Market Structure (+20)\n"
+        if currentAlerts.swingBullishBOS
+            score += 20
+            details := details + "Swing BOS (+20)\n"
+        if currentAlerts.internalBullishCHoCH
+            score += 15
+            details := details + "Int CHoCH (+15)\n"
+        if currentAlerts.internalBullishBOS
+            score += 10
+            details := details + "Int BOS (+10)\n"
+        if currentAlerts.bullishFairValueGap
+            score += 10
+            details := details + "FVG (+10)\n"
+        if isInOrderBlock(BULLISH)
+            score += 10
+            details := details + "Order Block (+10)\n"
+        if currentAlerts.equalLows
+            score += 5
+            details := details + "EQL (+5)\n"
+    else
+        if smcSwingBearBias
+            score += 20
+            details := details + "Swing Market Structure (+20)\n"
+        if currentAlerts.swingBearishBOS
+            score += 20
+            details := details + "Swing BOS (+20)\n"
+        if currentAlerts.internalBearishCHoCH
+            score += 15
+            details := details + "Int CHoCH (+15)\n"
+        if currentAlerts.internalBearishBOS
+            score += 10
+            details := details + "Int BOS (+10)\n"
+        if currentAlerts.bearishFairValueGap
+            score += 10
+            details := details + "FVG (+10)\n"
+        if isInOrderBlock(BEARISH)
+            score += 10
+            details := details + "Order Block (+10)\n"
+        if currentAlerts.equalHighs
+            score += 10
+            details := details + "EQH (+10)\n"
+
+    // --- FISHERMAN PUANLAMA (GIRIS) ---
+    if useFisherman
+        if is_OI_Rising
+            score += 20
+            details += "Fisherman: OI Yukseliyor (+20)\n"
+        else
+            score -= 20
+            details += "Fisherman: OI Dusuyor (-20)\n"
+
+        // Funding Normal Aralik (+10)
+        bool funding_normal_bull = w_funding > 0 and w_funding <= funding_trend_limit
+        bool funding_normal_bear = w_funding < 0 and w_funding >= -funding_trend_limit
+        
+        if isBuy and funding_normal_bull
+            score += 10
+            details += "Fisherman: Funding Onayli (+10)\n"
+        if not isBuy and funding_normal_bear
+            score += 10
+            details += "Fisherman: Funding Onayli (+10)\n"
+            
+    // TREND FILTRESI (BTC BAZLI) - MODIFIED: Sadece Altcoinler icin gecerli
+    if not isBTC
+        if trend_BTC_Price == -1 
+            if isBuy
+                score := score - 0 
+            else
+                score := score + 15 
+                details := details + "BTC Bear (+15)\n"
+        else if trend_BTC_Price == 1
+            if isBuy
+                score := score + 15
+                details := details + "BTC Bull (+15)\n"
+    
+    // PIYASA KONTEKSTI
+    if isBuy
+        if d_isTOTAL3_Bull and (not isBTC and not isTOTAL and not isTOTAL3)
+            score += 10
+            details := details + "Total3 Bull (+10)\n"
+        if d_isTOTAL_Bull and d_isBTC_D_Bull and isBTC
+            score += 10
+            details := details + "Total+Dom Bull (+10)\n"
+        if d_isTOTAL_Bull and (not d_isBTC_D_Bull) and (not isBTC and not isTOTAL and not isTOTAL3)
+            score += 10
+            details := details + "Total Bull/Dom Bear (+10)\n"
+        if not d_isDXY_Bull
+            score += 10
+            details := details + "DXY Bear (+10)\n"
+        if not d_isUSDT_D_Bull
+            score += 10
+            details := details + "USDT.D Bear (+10)\n"
+    else
+        if (not d_isTOTAL3_Bull) and (not isBTC and not isTOTAL and not isTOTAL3)
+            score += 10
+            details := details + "Total3 Bear (+10)\n"
+        if d_isUSDT_D_Bull
+            score += 10
+            details := details + "USDT.D Bull (+10)\n"
+        if d_isDXY_Bull
+            score += 10
+            details := details + "DXY Bull (+10)\n"
+            
+    if isBuy and isVixFalling
+        score += 10
+        details := details + "VIX Dusuyor (+10)\n"
+    if not isBuy and isVixRising
+        score += 10
+        details := details + "VIX Yukseliyor (+10)\n"
+
+    if is_low_delta_period
+        score := score - 10
+        details := details + "Low Vol (-10)\n"
+    
+    [score, details]
+// 6. LOGIC EXECUTION (SMC & DRAWING LOOPS)
+if is_tf_supported
+    // SMC Main Logic
+    getCurrentStructure(swingsLengthInput, false)
+    getCurrentStructure(5, false, true)
+
+    getCurrentStructure(equalHighsLowsLengthInput, true)
+
+    displayStructure(true)
+    displayStructure()
+
+    if currentAlerts.swingBullishCHoCH
+        smcSwingBullBias := true
+        smcSwingBearBias := false
+
+    if currentAlerts.swingBearishCHoCH
+        smcSwingBearBias := true
+        smcSwingBullBias := false
+    // ==========================================
+
+    if showInternalOrderBlocksInput
+        deleteOrderBlocks(true)
+
+    if showSwingOrderBlocksInput
+        deleteOrderBlocks()
+
+    if showFairValueGapsInput
+        drawFairValueGaps()
+
+    if barstate.islastconfirmedhistory or barstate.islast
+        if showInternalOrderBlocksInput
+            drawOrderBlocks(true)
+        if showSwingOrderBlocksInput
+            drawOrderBlocks()
+
+    if showHighLowSwingsInput
+        updateTrailingExtremes()
+        drawHighLowSwings()
+
+    if showFairValueGapsInput
+        deleteFairValueGaps()
+
+// DEGISKEN GUNCELLEMELERI (HER BARDA YAPILMALI)
+lastBarIndex := currentBarIndex
+currentBarIndex := bar_index
+newBar = currentBarIndex != lastBarIndex
+var float bandBasePercent = 0.10
+bandBasePercent := na(bandBasePercent[1]) ? 0.10 : bandBasePercent[1]
+
+// ====== S/R BANDS LOGIC ======
+var array<float> supportLevels = array.new<float>()
+var array<box> supportBoxes = array.new<box>()
+var array<int> supportAges = array.new<int>()
+var array<label> supportLabels = array.new<label>()
+
+var array<float> resistanceLevels = array.new<float>()
+var array<box> resistanceBoxes = array.new<box>()
+var array<int> resistanceAges = array.new<int>()
+var array<label> resistanceLabels = array.new<label>()
+
+ph = ta.pivothigh(high, leftBars, rightBars)
+pl = ta.pivotlow(low, leftBars, rightBars)
+
+getBandPercent(level) =>
+    float safeLevel = math.max(math.abs(level), 1e-8)
+    float atrPart = (scaledAtr / safeLevel) * 100
+    float combinedPercent = nz(bandBasePercent, 0.10) + atrPart
+    string symbol = syminfo.ticker
+    float maxPercent = str.contains(symbol, "BTC") ? 0.1 : 0.5
+    math.min(maxPercent, math.max(0.1, combinedPercent))
+
+getBandBounds(level) =>
+    float upperBand = level + scaledAtr * sr_band_factor
+    float lowerBand = level - scaledAtr * sr_band_factor
+    [upperBand, lowerBand]
+
+isOverlapping(newUpper, newLower, float[] levels) =>
+    if array.size(levels) > 0
+        bool result = false
+        for i = 0 to array.size(levels) - 1
+            float lvl = array.get(levels, i)
+            [uBand, lBand] = getBandBounds(lvl)
+            if not (newLower > uBand or newUpper < lBand)
+                result := true
+                break
+        result
+    else
+        false
+
+if is_tf_supported and showSRBands
+    if not na(ph)
+        [upBand, lowBand] = getBandBounds(ph)
+        if not isOverlapping(upBand, lowBand, resistanceLevels)
+            b = box.new(left = bar_index - rightBars - 3, top = upBand, right = bar_index, bottom = lowBand, xloc = xloc.bar_index, bgcolor = color.new(color.red, 85), border_color = color.new(color.red, 0))
+            box.set_extend(b, extend.right)
+            midPriceR = (upBand + lowBand) / 2
+            futureIndexR = bar_index + 500
+            lblR = label.new(x = futureIndexR, y = midPriceR, text = str.tostring(midPriceR, "#.##"), xloc = xloc.bar_index, yloc = yloc.price, style = label.style_label_right, textcolor = color.white, color = color.new(color.red, 100), size = size.small)
+            array.push(resistanceLevels, ph)
+            array.push(resistanceBoxes, b)
+            array.push(resistanceAges, bar_index)
+            array.push(resistanceLabels, lblR)
+
+    if not na(pl)
+        [upBand, lowBand] = getBandBounds(pl)
+        if not isOverlapping(upBand, lowBand, supportLevels)
+            b = box.new(left = bar_index - rightBars - 3, top = upBand, right = bar_index, bottom = lowBand, xloc = xloc.bar_index, bgcolor = color.new(color.green, 85), border_color = color.new(color.green, 0))
+            box.set_extend(b, extend.right)
+            midPrice = (upBand + lowBand) / 2
+            futureIndex = bar_index + 500
+            lbl = label.new(x = futureIndex, y = midPrice, text = str.tostring(midPrice, "#.##"), xloc = xloc.bar_index, yloc = yloc.price, style = label.style_label_right, textcolor = color.white, color = color.new(color.green, 100), size = size.small)
+            array.push(supportLevels, pl)
+            array.push(supportBoxes, b)
+            array.push(supportAges, bar_index)
+            array.push(supportLabels, lbl)
+
+// Clean up old/broken SR bands
+if (not showSRBands) or (not is_tf_supported)
+    if array.size(supportBoxes) > 0
+        for i = array.size(supportBoxes) - 1 to 0
+            box.delete(array.get(supportBoxes, i))
+            label.delete(array.get(supportLabels, i))
+    array.clear(supportLevels)
+    array.clear(supportBoxes)
+    array.clear(supportAges)
+    array.clear(supportLabels)
+    if array.size(resistanceBoxes) > 0
+        for i = array.size(resistanceBoxes) - 1 to 0
+            box.delete(array.get(resistanceBoxes, i))
+            label.delete(array.get(resistanceLabels, i))
+    array.clear(resistanceLevels)
+    array.clear(resistanceBoxes)
+    array.clear(resistanceAges)
+    array.clear(resistanceLabels)
+
+if is_tf_supported and array.size(supportLevels) > 0
+    for i = array.size(supportLevels) - 1 to 0
+        lvl = array.get(supportLevels, i)
+        age = bar_index - array.get(supportAges, i)
+        [upBand, lowBand] = getBandBounds(lvl)
+        bool isBroken = close < lowBand
+        bool isOld = age > maxAgeBars
+        if isBroken 
+            isBearishBreak := true 
+            if showBreakLabels
+                label.new(x = bar_index, y = low + scaledAtr*2, text = "B", xloc = xloc.bar_index, style = label.style_label_down, color = color.new(#ffffff, 0), textcolor = color.rgb(0, 0, 0), size = size.tiny)
+        if isBroken or isOld
+            box.delete(array.get(supportBoxes, i))
+            label.delete(array.get(supportLabels, i))
+            array.remove(supportLevels, i)
+            array.remove(supportBoxes, i)
+            array.remove(supportAges, i)
+            array.remove(supportLabels, i)
+
+if is_tf_supported and array.size(resistanceLevels) > 0
+    for i = array.size(resistanceLevels) - 1 to 0
+        lvl = array.get(resistanceLevels, i)
+        age = bar_index - array.get(resistanceAges, i)
+        [upBand, lowBand] = getBandBounds(lvl)
+        bool isBroken = close > upBand
+        bool isOld = age > maxAgeBars
+        if isBroken
+            isBullishBreak := true 
+            if showBreakLabels
+                label.new(x = bar_index, y = high - scaledAtr*2, text = "B", xloc = xloc.bar_index, style = label.style_label_up, color = color.new(#ffffff, 0), textcolor = color.rgb(0, 0, 0), size = size.tiny)
+        if isBroken or isOld
+            box.delete(array.get(resistanceBoxes, i))
+            label.delete(array.get(resistanceLabels, i))
+            array.remove(resistanceLevels, i)
+            array.remove(resistanceBoxes, i)
+            array.remove(resistanceAges, i)
+            array.remove(resistanceLabels, i)
+
+// ==========================================
+// 7. SINYAL VE TP/SL YONETIMI
+// ==========================================
+var float totalSignals = 0.0
+totalSignals := nz(totalSignals[1], 0.0)
+var float correctSignals = 0.0
+correctSignals := nz(correctSignals[1], 0.0)
+var int lastBuySignalBar = na
+var int lastSellSignalBar = na
+var float lastBuySignalPrice = na
+var float lastSellSignalPrice = na
+var float lastTPPrice = na
+var float lastSLPrice = na
+var bool isLastSignalBuy = na
+// isSignalActive: TP/SL takibi ve istatistik icin
+var bool isSignalActive = false
+isSignalActive := nz(isSignalActive[1], false)
+
+// YENI DEGISKENLER: TREND TAKIBI ICIN (TP/SL'den bagimsiz)
+var bool monitoringTrend = false
+var bool monitoringIsBuy = false
+var float monitoringEntryPrice = 0.0
+// EXIT SINYALLERI ISTATISTIGI
+var int totalExitSignals = 0
+var int correctExitSignals = 0
+// KÜMÜLATİF KAR/ZARAR TAKİBİ
+var float totalProfitPercent = 0.0
+
+// === YENI FILTRE: ARKA ARKAYA AYNI SINYAL ENGELLEME ===
+var int lastTradeDirection = 0 // 0: Nötr, 1: Long, -1: Short
+
+var array<line> currentLines = array.new_line()
+var array<label> currentLabels = array.new_label()
+
+clearOldLines() =>
+    if array.size(currentLines) > 0
+        for i = 0 to array.size(currentLines) - 1
+            line.delete(array.get(currentLines, i))
+    array.clear(currentLines)
+    if array.size(currentLabels) > 0
+        for i = 0 to array.size(currentLabels) - 1
+            label.delete(array.get(currentLabels, i))
+    array.clear(currentLabels)
+
+deleteSpecificLines(array<line> lines, array<label> labels) =>
+    if array.size(lines) > 0
+        for i = 0 to array.size(lines) - 1
+            line.delete(array.get(lines, i))
+    if array.size(labels) > 0
+        for i = 0 to array.size(labels) - 1
+            label.delete(array.get(labels, i))
+
+getNearestNLevels(float[] levelsArr, float entryPrice, int n, bool wantAbove) =>
+    result = array.new_float()
+    len = array.size(levelsArr)
+    if len > 0
+        candidates = array.new_float()
+        dists = array.new_float()
+        for i = 0 to len - 1
+            lvl = array.get(levelsArr, i)
+            cond = wantAbove ? (lvl > entryPrice) : (lvl < entryPrice)
+            if cond
+                array.push(candidates, lvl)
+                array.push(dists, math.abs(lvl - entryPrice))
+        
+        candSize = array.size(candidates)
+        if candSize > 0
+            toTake = math.min(n, candSize)
+            if toTake > 0
+                for k = 0 to toTake - 1
+                    if array.size(dists) == 0
+                        break 
+                    minIdx = 0
+                    minVal = array.get(dists, 0)
+                    if array.size(dists) > 1
+                        for j = 1 to array.size(dists) - 1
+                            dj = array.get(dists, j)
+                            if dj < minVal
+                                minVal := dj
+                                minIdx := j
+                    
+                    array.push(result, array.get(candidates, minIdx))
+                    array.remove(candidates, minIdx)
+                    array.remove(dists, minIdx)
+    result
+
+drawTPAndSLAndReturnLines(isBuySignal, entryPrice, supportLevels_arr, resistanceLevels_arr, orderBlocks_arr) =>
+    tpSlLines = array.new_line()
+    tpSlLabels = array.new_label()
+    sortedTpLevels = array.new_float()
+    float tp1Level = na
+    float slLevel = na
+
+    if isBuySignal
+        // SL STRATEJISI
+        float sl_SR = na
+        nearestSupports = getNearestNLevels(supportLevels_arr, entryPrice, 1, false)
+        if array.size(nearestSupports) > 0
+            float supPivot = array.get(nearestSupports, 0)
+            [supU, supL] = getBandBounds(supPivot)
+            sl_SR := supL
+        float sl_ATR = entryPrice - (scaledAtr * atrSLMultiplier)
+        if na(sl_SR)
+            slLevel := sl_ATR
+        else
+            slLevel := math.max(sl_SR, sl_ATR)
+
+        // LIQUIDITY POOL (LONG TP)
+        nearestRes = getNearestNLevels(resistanceLevels_arr, entryPrice, 3, true)
+        if array.size(nearestRes) > 0
+            for k = 0 to array.size(nearestRes) - 1
+                float resPivot = array.get(nearestRes, k)
+                [resU, resL] = getBandBounds(resPivot) 
+                array.push(sortedTpLevels, resL) 
+        
+        float mainTPLevel = na
+        if array.size(orderBlocks_arr) > 0
+            mainTPLevel := array.get(orderBlocks_arr, 0).barLow
+
+        if array.size(sortedTpLevels) >= 1
+            float tp1 = array.get(sortedTpLevels, 0)
+            tp1Level := tp1 
+            tp1Line = line.new(bar_index, tp1Level, bar_index + 75, tp1Level, color=color.purple, style=line.style_solid, width=2)
+            array.push(tpSlLines, tp1Line)
+            tp1Label = label.new(bar_index + 75, tp1Level, text='Liq TP (-%1)', color=color.new(color.purple,0), textcolor=color.white, style=label.style_label_left, size=size.small)
+            array.push(tpSlLabels, tp1Label)
+        else if not na(mainTPLevel)
+            tp1Level := mainTPLevel
+            mainLine = line.new(bar_index, tp1Level, bar_index + 75, tp1Level, color=color.purple, style=line.style_solid, width=2)
+            array.push(tpSlLines, mainLine)
+            mainLabel = label.new(bar_index + 75, tp1Level, text='OB TP', color=color.new(color.purple,0), textcolor=color.white, style=label.style_label_left, size=size.small)
+            array.push(tpSlLabels, mainLabel)
+        
+        if not na(slLevel)
+            slLine = line.new(bar_index, slLevel, bar_index + 75, slLevel, color=color.purple, style=line.style_solid, width=2)
+            array.push(tpSlLines, slLine)
+            slLabel = label.new(bar_index + 75, slLevel, text='SL', color=color.new(color.purple,0), textcolor=color.white, style=label.style_label_left, size=size.small)
+            array.push(tpSlLabels, slLabel)
+        [tpSlLines, tpSlLabels, tp1Level, slLevel]
+    else
+        // SL STRATEJISI
+        float sl_SR = na
+        nearestResForSL = getNearestNLevels(resistanceLevels_arr, entryPrice, 1, true)
+        if array.size(nearestResForSL) > 0
+            float resPivot = array.get(nearestResForSL, 0)
+            [resU, resL] = getBandBounds(resPivot)
+            sl_SR := resU
+        float sl_ATR = entryPrice + (scaledAtr * atrSLMultiplier)
+        if na(sl_SR)
+            slLevel := sl_ATR
+        else
+            slLevel := math.min(sl_SR, sl_ATR)
+
+        // LIQUIDITY POOL (SHORT TP)
+        nearestSupportsForTP = getNearestNLevels(supportLevels_arr, entryPrice, 3, false)
+        if array.size(nearestSupportsForTP) > 0
+            for k = 0 to array.size(nearestSupportsForTP) - 1
+                float supPivot = array.get(nearestSupportsForTP, k)
+                [supU, supL] = getBandBounds(supPivot)
+                array.push(sortedTpLevels, supU)
+        
+        float mainTPLevel = na
+        if array.size(orderBlocks_arr) > 0
+            mainTPLevel := array.get(orderBlocks_arr, 0).barHigh
+
+        if array.size(sortedTpLevels) >= 1
+            float tp1 = array.get(sortedTpLevels, 0)
+            tp1Level := tp1 
+            tp1Line = line.new(bar_index, tp1Level, bar_index + 75, tp1Level, color=color.purple, style=line.style_solid, width=2)
+            array.push(tpSlLines, tp1Line)
+            tp1Label = label.new(bar_index + 75, tp1Level, text='Liq TP (+%1)', color=color.new(color.purple,0), textcolor=color.white, style=label.style_label_left, size=size.small)
+            array.push(tpSlLabels, tp1Label)
+        else if not na(mainTPLevel)
+            tp1Level := mainTPLevel
+            mainLine = line.new(bar_index, tp1Level, bar_index + 75, tp1Level, color=color.purple, style=line.style_solid, width=2)
+            array.push(tpSlLines, mainLine)
+            mainLabel = label.new(bar_index + 75, tp1Level, text='OB TP', color=color.new(color.purple,0), textcolor=color.white, style=label.style_label_left, size=size.small)
+            array.push(tpSlLabels, mainLabel)
+        
+        if not na(slLevel)
+            slLine = line.new(bar_index, slLevel, bar_index + 75, slLevel, color=color.purple, style=line.style_solid, width=2)
+            array.push(tpSlLines, slLine)
+            slLabel = label.new(bar_index + 75, slLevel, text='SL', color=color.new(color.purple,0), textcolor=color.white, style=label.style_label_left, size=size.small)
+            array.push(tpSlLabels, slLabel)
+        [tpSlLines, tpSlLabels, tp1Level, slLevel]
+
+[buyScore, buyScoreDetails] = calculateScore(true)
+[sellScore, sellScoreDetails] = calculateScore(false)
+
+bool buySignalCondition = isBTC ? buyScore >= 115 : buyScore >= 135
+bool sellSignalCondition = isBTC ? sellScore >= 115 : sellScore >= 135
+bool filterBTC_Buy = false
+bool filterBTC_Sell = false
+bool filterAlt_Buy = false
+bool filterAlt_Sell = false
+
+if useSmartFilters and is_tf_supported
+    if isBTC
+        if d_isUSDT_D_Bull
+            filterBTC_Buy := true
+        if not d_isUSDT_D_Bull
+            filterBTC_Sell := true
+    if isAltcoin
+        if (trend_BTC_Price == -1) and d_isBTC_D_Bull
+            filterAlt_Buy := true
+
+float deviationThreshold = isBTC ? 5.0 : (isAltcoin ? 8.0 : 5.0)
+float distFromZLT = math.abs(close - zltZlema) / zltZlema * 100
+bool isDeviationSafe = distFromZLT < deviationThreshold
+
+bool validBuySignal = showBuySignals and buySignalCondition and not filterBTC_Buy and not filterAlt_Buy and isDeviationSafe
+bool validSellSignal = showSellSignals and sellSignalCondition and not filterBTC_Sell and not filterAlt_Sell and isDeviationSafe
+
+rsiValue = ta.rsi(close, 14)
+var bool hasHitTP = false 
+
+if monitoringTrend and not monitoringTrend[1]
+    hasHitTP := false
+
+if monitoringTrend and barstate.isconfirmed and is_tf_supported
+    bool forceExit = false
+    float exitPnl = 0.0
+    float currentPrice = close
+    float exitScore = 0.0
+    float qqeHistVal = qqeRsiLine - 50 
+    string exitDetails = "" 
+
+    if monitoringIsBuy and validSellSignal
+        forceExit := true
+        exitPnl := (currentPrice - monitoringEntryPrice) / monitoringEntryPrice * 100
+        exitDetails := "Ters Sinyal (Short Geldi)"
+    
+    if not monitoringIsBuy and validBuySignal
+        forceExit := true
+        exitPnl := (monitoringEntryPrice - currentPrice) / monitoringEntryPrice * 100
+        exitDetails := "Ters Sinyal (Long Geldi)"
+
+    if not forceExit
+        // --- FISHERMAN EXIT LOGIC (YENI) ---
+        // Funding Limit Asimi = Exit Sebebi (+40 Puan)
+        if useFisherman
+            bool is_Funding_Extreme_High = w_funding > funding_trend_limit
+            bool is_Funding_Extreme_Low = w_funding < -funding_trend_limit
+            
+            if monitoringIsBuy and is_Funding_Extreme_High
+                exitScore += 40
+                exitDetails += "Fisherman: Funding Asiri Yuksek! (+40)\n"
+            
+            if not monitoringIsBuy and is_Funding_Extreme_Low
+                exitScore += 40
+                exitDetails += "Fisherman: Funding Asiri Dusuk! (+40)\n"
+
+        if monitoringIsBuy 
+            if not na(lastTPPrice) and high >= lastTPPrice
+                hasHitTP := true
+            
+            if hasHitTP
+                exitScore += 10
+                exitDetails += "TP Hit (Memory) (+10)\n"
+
+            if qqeHistVal < qqeHistVal[1]
+                exitScore += 5
+                exitDetails += "Hist Zayif (+5)\n"
+            if isStochSellCross
+                exitScore += 10
+                exitDetails += "Stoch Cross (+10)\n"
+            if isZltBearishTrendChange
+                exitScore += 10
+                exitDetails += "ZLT Donus (+10)\n"
+            if rsiValue > 75
+                exitScore += 5
+                exitDetails += "RSI > 75 (+5)\n"
+            if isQQEBearishCross
+                exitScore += 20
+                exitDetails += "QQE Cross (+20)\n"
+            
+            // --- DINAMIK VOLATILITE ILE EXIT (LONG) ---
+            float vol_atr_current = ta.atr(20)
+            float vol_index_current = (vol_atr_current / close) * 100
+            float dist_percent_long_exit = (high - zltZlema) / zltZlema * 100
+            float vol_score_long_raw = (vol_index_current > 0) ? (dist_percent_long_exit / vol_index_current) : 0
+            float vol_score_long = math.max(1.0, vol_score_long_raw)
+
+            if high > zltZlema
+                if vol_score_long >= 5.0
+                    exitScore += 50
+                    exitDetails += "Vol Score > 5 (+50)\n"
+                else if vol_score_long >= 4.0
+                    exitScore += 40
+                    exitDetails += "Vol Score > 4 (+40)\n"
+                else if vol_score_long >= 3.0
+                    exitScore += 30
+                    exitDetails += "Vol Score > 3 (+30)\n"
+                else if vol_score_long >= 2.0
+                    exitScore += 20
+                    exitDetails += "Vol Score > 2 (+20)\n"
+                else if vol_score_long >= 1.0
+                    exitScore += 10
+                    exitDetails += "Vol Score > 1 (+10)\n"
+
+            if exitScore >= 50
+                forceExit := true
+                exitPnl := (currentPrice - monitoringEntryPrice) / monitoringEntryPrice * 100
+        
+        else 
+            if not na(lastTPPrice) and low <= lastTPPrice
+                hasHitTP := true
+            
+            if hasHitTP
+                exitScore += 10
+                exitDetails += "TP Hit (Memory) (+10)\n"
+
+            if qqeHistVal > qqeHistVal[1]
+                exitScore += 5
+                exitDetails += "Hist Zayif (+5)\n"
+            if isStochBuyCross
+                exitScore += 10
+                exitDetails += "Stoch Cross (+10)\n"
+            if isZltBullishTrendChange
+                exitScore += 10
+                exitDetails += "ZLT Donus (+10)\n"
+            if rsiValue < 25
+                exitScore += 5
+                exitDetails += "RSI < 25 (+5)\n"
+            if isQQEBullishCross
+                exitScore += 20
+                exitDetails += "QQE Cross (+20)\n"
+            
+            // --- DINAMIK VOLATILITE ILE EXIT (SHORT) ---
+            float vol_atr_current = ta.atr(20)
+            float vol_index_current = (vol_atr_current / close) * 100
+            float dist_percent_short_exit = (zltZlema - low) / zltZlema * 100
+            float vol_score_short_raw = (vol_index_current > 0) ? (dist_percent_short_exit / vol_index_current) : 0
+            float vol_score_short = math.max(1.0, vol_score_short_raw)
+
+            if low < zltZlema
+                if vol_score_short >= 5.0
+                    exitScore += 50
+                    exitDetails += "Vol Score > 5 (+50)\n"
+                else if vol_score_short >= 4.0
+                    exitScore += 40
+                    exitDetails += "Vol Score > 4 (+40)\n"
+                else if vol_score_short >= 3.0
+                    exitScore += 30
+                    exitDetails += "Vol Score > 3 (+30)\n"
+                else if vol_score_short >= 2.0
+                    exitScore += 20
+                    exitDetails += "Vol Score > 2 (+20)\n"
+                else if vol_score_short >= 1.0
+                    exitScore += 10
+                    exitDetails += "Vol Score > 1 (+10)\n"
+
+            if exitScore >= 50
+                forceExit := true
+                exitPnl := (monitoringEntryPrice - currentPrice) / monitoringEntryPrice * 100
+    
+    if forceExit
+        monitoringTrend := false 
+        totalExitSignals += 1
+        totalProfitPercent += exitPnl
+
+        if exitPnl > 0
+            correctExitSignals += 1
+        
+        if showExitSignals
+            float exitLabelY = monitoringIsBuy ? high + (scaledAtr * 3) : low - (scaledAtr * 3)
+            label.new(x = bar_index, y = exitLabelY, text = "EXIT\nKar: %" + str.tostring(exitPnl, "#.##") + "\nExit Puan: " + str.tostring(exitScore), tooltip = exitDetails, xloc = xloc.bar_index, style = monitoringIsBuy ? label.style_label_down : label.style_label_up, color = color.purple, textcolor = color.white, size = size.small)
+            alert("Jarvis Trend Exit Sinyali: " + syminfo.tickerid + " Kar: %" + str.tostring(exitPnl, "#.##"), alert.freq_once_per_bar_close)
+
+// --- TP/SL KONTROLU ---
+if isSignalActive and barstate.isconfirmed
+    slHit = false
+    tpHit = false
+    if isLastSignalBuy
+        if not na(lastSLPrice) and low <= lastSLPrice
+            slHit := true
+        else if not na(lastTPPrice) and high >= lastTPPrice
+            tpHit := true
+    else
+        if not na(lastSLPrice) and high >= lastSLPrice
+            slHit := true
+        else if not na(lastTPPrice) and low <= lastTPPrice
+            tpHit := true
+
+    if slHit or tpHit
+        if slHit
+            totalSignals += 1
+        else if tpHit
+            correctSignals += 1
+            totalSignals += 1
+        isSignalActive := false
+        clearOldLines()
+
+// --- SINYAL GIRISLERI ---
+if bar_index >= (last_bar_index - 500) and is_tf_supported
+    // AL SINYALI (Filtre: lastTradeDirection != 1)
+    if validBuySignal and not monitoringTrend and lastTradeDirection != 1
+        clearOldLines()
+        [linesArr, labelsArr, tpPrice, slPrice] = drawTPAndSLAndReturnLines(true, close, supportLevels, resistanceLevels, internalOrderBlocks)
+        bool isValidTrade = false
+        float rrOrani = 0.0
+        if not na(tpPrice) and not na(slPrice)
+            bool tpHitOnEntry = high >= tpPrice
+            float risk = math.abs(close - slPrice)
+            float getiri = math.abs(tpPrice - close)
+            if risk > 0
+                rrOrani := getiri / risk
+                if rrOrani >= minRR and (minRR == 0.0 ? true : not tpHitOnEntry)
+                    isValidTrade := true
+        
+        if not isValidTrade
+            deleteSpecificLines(linesArr, labelsArr) 
+        else
+            // Trade Yonetimi
+            isSignalActive := true
+            isLastSignalBuy := true
+            lastBuySignalBar := bar_index
+            lastBuySignalPrice := close
+            lastTPPrice := tpPrice
+            lastSLPrice := slPrice
+            currentLines := linesArr
+            currentLabels := labelsArr
+            
+            monitoringTrend := true
+            monitoringIsBuy := true
+            monitoringEntryPrice := close
+            
+            // FILTRE GUNCELLEME: Artik Long'dayiz, bir sonraki Long'u engelle
+            lastTradeDirection := 1 
+
+            zltBullCredit := false
+            vidyaBullCredit := false
+
+            lblText = str.tostring(buyScore, "#") + " | R:R: " + str.tostring(rrOrani, "#.#")
+            label.new(x = bar_index, y = low - scaledAtr, text = lblText, tooltip = buyScoreDetails, xloc = xloc.bar_index, style = label.style_label_up, color = color.new(color.green, 0), textcolor = color.white, size = size.small)
+            alert("Jarvis Al Sinyali: " + syminfo.tickerid + " Puan: " + str.tostring(buyScore) + " R:R: " + str.tostring(rrOrani, "#.#") + "\nDetaylar:\n" + buyScoreDetails, alert.freq_once_per_bar_close)
+    
+    // SAT SINYALI (Filtre: lastTradeDirection != -1)
+    if validSellSignal and not monitoringTrend and lastTradeDirection != -1
+        clearOldLines()
+        [linesArr, labelsArr, tpPrice, slPrice] = drawTPAndSLAndReturnLines(false, close, supportLevels, resistanceLevels, internalOrderBlocks)
+        bool isValidTrade = false
+        float rrOrani = 0.0
+        if not na(tpPrice) and not na(slPrice)
+            bool tpHitOnEntry = low <= tpPrice
+            float risk = math.abs(slPrice - close)
+            float getiri = math.abs(close - tpPrice)
+            if risk > 0
+                rrOrani := getiri / risk
+                if rrOrani >= minRR and (minRR == 0.0 ? true : not tpHitOnEntry)
+                    isValidTrade := true
+        
+        if not isValidTrade
+            deleteSpecificLines(linesArr, labelsArr)
+        else
+            // Trade Yonetimi
+            isSignalActive := true
+            isLastSignalBuy := false
+            lastSellSignalBar := bar_index
+            lastSellSignalPrice := close
+            lastTPPrice := tpPrice
+            lastSLPrice := slPrice
+            currentLines := linesArr
+            currentLabels := labelsArr
+
+            monitoringTrend := true
+            monitoringIsBuy := false
+            monitoringEntryPrice := close
+
+            // FILTRE GUNCELLEME: Artik Short'tayiz, bir sonraki Short'u engelle
+            lastTradeDirection := -1 
+
+            zltBearCredit := false
+            vidyaBearCredit := false
+
+            lblText = str.tostring(sellScore, "#") + " | R:R: " + str.tostring(rrOrani, "#.#")
+            label.new(x = bar_index, y = high + scaledAtr, text = lblText, tooltip = sellScoreDetails, xloc = xloc.bar_index, style = label.style_label_down, color = color.new(color.red, 0), textcolor = color.white, size = size.small)
+            alert("Jarvis Sat Sinyali: " + syminfo.tickerid + " Puan: " + str.tostring(sellScore) + " R:R: " + str.tostring(rrOrani, "#.#") + "\nDetaylar:\n" + sellScoreDetails, alert.freq_once_per_bar_close)
+
+// ==========================================
+// 8. VISUALS & PLOTS
+// ==========================================
+// Cizimler sadece desteklenen timeframelerde yapilir
+plot(is_tf_supported and showEMA ? nz(ema8, na) : na, color = color.new(color.white, 0), title = "8 Gunluk EMA", linewidth = 2)
+plot(is_tf_supported and showEMA ? nz(ema200, na) : na, color = color.new(color.orange, 0), title = "200 Gunluk EMA", linewidth = 2)
+
+// Bollinger
+p_upper = plot(is_tf_supported and showBollinger ? upper : na, color = color.new(color.blue, 0), title = "Bollinger Upper", linewidth = 1)
+p_basis = plot(is_tf_supported and showBollinger ? basis : na, color = color.new(color.gray, 50), title = "Bollinger Basis", linewidth = 1)
+p_lower = plot(is_tf_supported and showBollinger ? lower : na, color = color.new(color.purple, 0), title = "Bollinger Lower", linewidth = 1)
+fill(p_upper, p_basis, color.new(color.blue, 95)) // Basitlestirilmis fill
+fill(p_lower, p_basis, color.new(color.purple, 95))
+
+// QQE
+qqeColor = qqeRsiLine - 50 > 0 ? #00c3ff : #ff0062
+plot(is_tf_supported and showQQE ? qqeRsiLine - 50 : na, title = "QQE RSI Line", color = color.new(qqeColor, 0), linewidth = 2)
+plot(is_tf_supported and showQQE ? qqeRsiLine - 50 : na, title = "QQE Histogram", color = color.new(qqeColor, 0), style = plot.style_columns)
+
+// ZLT
+zltColor = zltTrend == 1 ? color.new(#00ffbb, 70) : color.new(#ff1100, 70)
+zltPlot = plot(is_tf_supported and showZLT ? zltZlema : na, title = "Zero Lag Basis", linewidth = 2, color = zltColor)
+zltUpperPlot = plot(is_tf_supported and showZLT and zltTrend == -1 ? zltZlema + zltVolatility : na, style = plot.style_linebr, color = color.new(#ff1100, 90), title = "ZLT Upper Band")
+zltLowerPlot = plot(is_tf_supported and showZLT and zltTrend == 1 ? zltZlema - zltVolatility : na, style = plot.style_linebr, color = color.new(#00ffbb, 90), title = "ZLT Lower Band")
+fill(zltPlot, zltUpperPlot, color.new(#ff1100, 90))
+fill(zltPlot, zltLowerPlot, color.new(#00ffbb, 90))
+
+// VIDYA
+var float vidya_smoothed_value = na
+if is_vidya_trend_up
+    vidya_smoothed_value := vidya_lower_band
+else
+    vidya_smoothed_value := vidya_upper_band
+vidya_trend_color = is_vidya_trend_up ? vidya_up_trend_color : vidya_down_trend_color
+p1_vidya = plot(is_tf_supported and showVolumaticVidya ? vidya_smoothed_value : na, title = "VIDYA Trend", linewidth = 2)
+p2_vidya = plot(is_tf_supported and showVolumaticVidya ? hl2 : na, display = display.none)
+fill(p1_vidya, p2_vidya, color.new(vidya_trend_color, 80))
+
+// ==========================================
+// 9. DUAL DASHBOARD SYSTEM
+// ==========================================
+// Table 1: STRATEJI ISTATISTIKLERI (Sag Alt)
+var table jarvisStatsTbl = table.new(position.bottom_right, 2, 11, border_width = 1)
+
+// Eger desteklenmeyen timeframe ise ERROR TABLE bas
+var table errorTbl = table.new(position.middle_center, 1, 1)
+if not is_tf_supported and barstate.islast
+    table.cell(errorTbl, 0, 0, "BU ZAMAN DILIMI DESTEKLENMIYOR\nLutfen 1S, 2S, 3S, 4S, Gunluk veya Haftalik kullanin.", bgcolor=color.red, text_color=color.white, text_size=size.large)
+else
+    table.clear(errorTbl, 0, 0)
+
+// Renk ve Stil Ayarlari
+tableBgColor = showDashboard ? color.new(#1e222d, 20) : color.new(#1e222d, 100)
+tableBorderColor = showDashboard ? color.new(#ffffff, 50) : color.new(#ffffff, 100)
+tableTextColor = showDashboard ? color.white : color.new(color.white, 100)
+
+// Tablo 1 Icin Ayarlar
+table.set_bgcolor(jarvisStatsTbl, tableBgColor)
+table.set_border_color(jarvisStatsTbl, tableBorderColor)
+
+// WR Hesaplamalari (Ayrı Ayrı)
+tradeWR = totalSignals > 0 ? (correctSignals / totalSignals) * 100 : 0
+tradeWRText = str.tostring(tradeWR, "#.##") + "% (" + str.tostring(correctSignals, "#") + "/" + str.tostring(totalSignals, "#") + ")"
+
+exitWR = totalExitSignals > 0 ? (correctExitSignals / totalExitSignals) * 100 : 0
+exitWRText = str.tostring(exitWR, "#.##") + "% (" + str.tostring(correctExitSignals, "#") + "/" + str.tostring(totalExitSignals, "#") + ")"
+
+// Helper: Large Number Formatter
+f_fmt_oi(_v) =>
+    _v >= 1000000000 ? str.tostring(_v/1000000000, "#.##") + "B" : str.tostring(_v/1000000, "#.##") + "M"
+
+if showDashboard and is_tf_supported
+    // --- TABLO 1: STRATEJI (SAG ALT) ---
+    // Header
+    table.cell(jarvisStatsTbl, 0, 0, "JARVIS FISHERMAN", text_color = tableTextColor, bgcolor=color.new(color.gray, 60))
+    table.cell(jarvisStatsTbl, 1, 0, "", text_color = tableTextColor, bgcolor=color.new(color.gray, 60))
+    
+    // 1. TP/SL WR
+    table.cell(jarvisStatsTbl, 0, 1, "TP/SL WR", text_color = tableTextColor, text_halign=text.align_left)
+    table.cell(jarvisStatsTbl, 1, 1, tradeWRText, text_color = tableTextColor)
+
+    // 2. EXIT WR
+    table.cell(jarvisStatsTbl, 0, 2, "EXIT WR", text_color = tableTextColor, text_halign=text.align_left)
+    table.cell(jarvisStatsTbl, 1, 2, exitWRText, text_color = tableTextColor)
+
+    // 3. VOL SCORE
+    float d_atr = ta.atr(20)
+    float d_index = (d_atr / close) * 100
+    float d_dist = (math.abs(close - zltZlema) / zltZlema) * 100
+    float vol_score_unit_raw = (d_index > 0) ? (d_dist / d_index) : 0
+    float vol_score_unit = math.max(1.0, vol_score_unit_raw)
+    
+    color volScoreColor = vol_score_unit > 3.0 ? color.orange : (vol_score_unit > 1.0 ? color.green : color.gray)
+    table.cell(jarvisStatsTbl, 0, 3, "VOL SCORE", text_color = tableTextColor, text_halign=text.align_left)
+    table.cell(jarvisStatsTbl, 1, 3, str.tostring(vol_score_unit, "#.##"), text_color = color.white, bgcolor = volScoreColor)
+
+    // 4. TOTAL PNL
+    color pnlColor = totalProfitPercent >= 0 ? color.green : color.red
+    table.cell(jarvisStatsTbl, 0, 4, "TOTAL PNL", text_color = tableTextColor, text_halign=text.align_left)
+    table.cell(jarvisStatsTbl, 1, 4, str.tostring(totalProfitPercent, "#.##") + "%", text_color = color.white, bgcolor = pnlColor)
+
+    // --- 5. BINANCE RATE ---
+    color binCol = bin_display >= 0.00015 ? color.red : bin_display <= -0.0001 ? color.green : color.gray
+    table.cell(jarvisStatsTbl, 0, 5, "Binance Rate", text_color = tableTextColor, text_halign=text.align_left)
+    table.cell(jarvisStatsTbl, 1, 5, str.tostring(bin_display * 100, "#.####") + "%", text_color = binCol)
+
+    // --- 6. OKX RATE ---
+    color okxCol = okx_display >= 0.00015 ? color.red : okx_display <= -0.0001 ? color.green : color.gray
+    table.cell(jarvisStatsTbl, 0, 6, "OKX Rate", text_color = tableTextColor, text_halign=text.align_left)
+    table.cell(jarvisStatsTbl, 1, 6, str.tostring(okx_display * 100, "#.####") + "%", text_color = okxCol)
+
+    // --- 7. BYBIT RATE ---
+    color bybCol = byb_display >= 0.00015 ? color.red : byb_display <= -0.0001 ? color.green : color.gray
+    table.cell(jarvisStatsTbl, 0, 7, "Bybit Rate", text_color = tableTextColor, text_halign=text.align_left)
+    table.cell(jarvisStatsTbl, 1, 7, str.tostring(byb_display * 100, "#.####") + "%", text_color = bybCol)
+
+    // --- 8. WEIGHTED AVG FUNDING ---
+    color wFundingColor = w_funding >= funding_trend_limit ? color.red : w_funding <= -funding_trend_limit ? color.green : color.white
+    table.cell(jarvisStatsTbl, 0, 8, "AVG Funding", text_color = tableTextColor, text_halign=text.align_left)
+    table.cell(jarvisStatsTbl, 1, 8, str.tostring(w_funding * 100, "0.0000") + "%", text_color = wFundingColor, bgcolor=color.new(wFundingColor, 80))
+
+    // --- 9. OI CURRENT ---
+    color currOiCol = grand_total_oi > grand_total_oi_prev ? color.green : color.red
+    table.cell(jarvisStatsTbl, 0, 9, "OI (Current)", text_color = tableTextColor, text_halign=text.align_left)
+    table.cell(jarvisStatsTbl, 1, 9, f_fmt_oi(grand_total_oi), text_color = currOiCol)
+
+    // --- 10. OI PREVIOUS ---
+    table.cell(jarvisStatsTbl, 0, 10, "OI (Previous)", text_color = tableTextColor, text_halign=text.align_left)
+    table.cell(jarvisStatsTbl, 1, 10, f_fmt_oi(grand_total_oi_prev), text_color = color.gray)
+
+// ALARMS
+alertcondition(currentAlerts.swingBullishBOS, 'Swing Bullish BOS', 'Swing Bullish BOS olustu')
+alertcondition(currentAlerts.swingBullishCHoCH, 'Swing Bullish CHoCH', 'Swing Bullish CHoCH olustu')
+alertcondition(currentAlerts.swingBearishBOS, 'Swing Bearish BOS', 'Swing Bearish BOS olustu')
+alertcondition(currentAlerts.swingBearishCHoCH, 'Swing Bearish CHoCH', 'Swing Bearish CHoCH olustu')
+alertcondition(currentAlerts.bullishFairValueGap, 'Bullish FVG', 'Bullish FVG olustu')
+alertcondition(currentAlerts.bearishFairValueGap, 'Bearish FVG', 'Bearish FVG olustu')
+alertcondition(currentAlerts.equalHighs, 'Equal Highs', 'Equal Highs tespit edildi')
+alertcondition(currentAlerts.equalLows, 'Equal Lows', 'Equal Lows tespit edildi')
